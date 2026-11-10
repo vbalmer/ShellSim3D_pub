@@ -1,0 +1,6 @@
+__pycache__/
+*.pyc
+wandb/
+sampling/plots/
+
+# sampling/data holds the small example dataset (committed); write large runs elsewhere via DATA_DIR
