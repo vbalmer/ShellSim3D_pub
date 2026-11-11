@@ -5,8 +5,13 @@ Only the material options used by the sampler are implemented:
     cm_klij   = 1  linear elastic (used for the elastic reference), 3  nonlinear reinforced concrete
     cmcc      = 1  concrete in compression acc. to fib Model Code / CSFM, 2  parabola acc. to Kaufmann (1998)
     cmcs      = 1  compression softening acc. to CSFM,                    2  acc. to Kaufmann (1998)
-    steel        tension chord model (TCM) with a bilinear bare-steel law
-Cracks are rotating (crack direction = principal direction). cmcc / cmcs are read from mat_dict (default 1).
+    steel        tension chord model (TCM) with a bilinear bare-steel law; mat_dict['ts'] = False: bare steel
+                 at the cracks (no tension stiffening)
+Cracks are rotating (crack direction = principal direction). cmcc / cmcs / ts are read from mat_dict (default 1 / 1 /
+True).
+
+Also used by the deployment (deploying/fea_utils/fem_vb.py) with dtype = complex128, the 5-component strains
+[ex, ey, gxy, gxz, gyz] and out(shear_out=True), which appends the linear out-of-plane shear stresses txz, tyz.
 """
 
 from .config import USE_GPU
@@ -19,11 +24,25 @@ else:
 
 
 class ConstitutiveLaws():
-    def __init__(self, e, constants, mat_dict, cm_klij = 3, geom = None):
+    """
+    Args:
+        e         (np.arr): layer strains (n_tot, nl, 3) [ex, ey, gxy], or (n_tot, nl, 5) incl. gxz, gyz for
+                            out(shear_out=True)
+        constants (dict):   nu, n_layer, rho_x, rho_y (per layer), D (bar diameter)
+        mat_dict  (dict):   concrete (ect, ec0, Ec, fct, fcp, tb0, tb1) and steel (Es, Esh, fsy, fsu) parameters,
+                            optional cmcc, cmcs, ts
+        cm_klij   (int):    1 - linear elastic, 3 - nonlinear reinforced concrete
+        geom      (dict):   optional per-sample overrides: rho_x, rho_y, mat (concrete), mat_s (steel)
+        dtype     (dtype):  complex dtype of the stresses (sampling: complex64, deployment: complex128)
+        verbose   (bool):   print how many points trigger the shear-stiffness floor in out()
+    """
+    def __init__(self, e, constants, mat_dict, cm_klij = 3, geom = None, dtype = np.complex64, verbose = True):
 
         # General
         self.cm_klij = cm_klij          # material type: 1 - lin.el., 3 - nonlinear RC
-        self.e = e*cplx(np.ones_like(e),np.zeros_like(e))   # complex layer strains, shape: (n_tot, nl, 3)
+        self.dtype = dtype
+        self.verbose = verbose
+        self.e = e*cplx(np.ones_like(e),np.zeros_like(e))   # complex layer strains, shape: (n_tot, nl, 3 or 5)
 
         # Material parameters
         self.ect = mat_dict['ect']
@@ -33,6 +52,7 @@ class ConstitutiveLaws():
         self.fcp = mat_dict['fcp']
         self.tb0 = mat_dict['tb0']
         self.tb1 = mat_dict['tb1']
+        self.ts  = mat_dict.get('ts', True)          # tension stiffening (TCM); False: bare steel at the cracks
         self.cmcc = int(mat_dict.get('cmcc', 1))     # concrete in compression: 1 - fib / CSFM, 2 - Kaufmann (1998)
         self.cmcs = int(mat_dict.get('cmcs', 1))     # compression softening:   1 - CSFM, 2 - Kaufmann (1998)
         if self.cmcc not in (1, 2) or self.cmcs not in (1, 2):
@@ -289,6 +309,10 @@ class ConstitutiveLaws():
             - ss:           steel stressses
         -------------------------------------------------------------------------------------------------------------"""
 
+        # no tension stiffening: bare steel at the crack
+        if not self.ts:
+            return self.ss_bilin(e, self._steel(mask))
+
         tb0, tb1, Ec = self._m(self.tb0, mask), self._m(self.tb1, mask), self._m(self.Ec, mask)
         st = self._steel(mask)
         ssr = self.ssr_tcm_bilin(e+ecs, ec+ecs, srm, rho, tb0, tb1, Ec, st)
@@ -525,11 +549,11 @@ class ConstitutiveLaws():
         e1t,_,th,_,_,_,ec1,ec3 = self.principal(e[:,:,0:1], e[:,:,1:2], e[:,:,2:3])
         
         # 2 Steel Contribution
-        ssx = np.zeros((e.shape[0], e.shape[1],1), dtype = np.complex64)
+        ssx = np.zeros((e.shape[0], e.shape[1],1), dtype = self.dtype)
         mask_rhox = (self.rho_x != 0)
         ssx[mask&mask_rhox] = self.ss_bilin(e[:,:,0:1][mask&mask_rhox], self._steel(mask&mask_rhox))
 
-        ssy = np.zeros((e.shape[0], e.shape[1],1), dtype = np.complex64)
+        ssy = np.zeros((e.shape[0], e.shape[1],1), dtype = self.dtype)
         mask_rhoy = (self.rho_y != 0)
         ssy[mask&mask_rhoy] = self.ss_bilin(e[:,:,1:2][mask&mask_rhoy], self._steel(mask&mask_rhoy))
 
@@ -572,7 +596,7 @@ class ConstitutiveLaws():
         srx, sry, _, _ = self.sr0_vc(th)
 
         # 2 Steel Contribution
-        ssx = np.zeros((e.shape[0], e.shape[1],1), dtype = np.complex64)
+        ssx = np.zeros((e.shape[0], e.shape[1],1), dtype = self.dtype)
         mask_rhox = (self.rho_x != 0)
         mask_e = e[:,:,0:1] > ecx
         mask_1_x = mask & mask_rhox & mask_e
@@ -581,7 +605,7 @@ class ConstitutiveLaws():
         mask_2_x = mask & mask_rhox & ~mask_e
         ssx[mask_2_x] = self.ss_bilin(self.e[:,:,0:1][mask_2_x], self._steel(mask_2_x))
 
-        ssy = np.zeros((e.shape[0], e.shape[1],1), dtype=np.complex64)
+        ssy = np.zeros((e.shape[0], e.shape[1],1), dtype=self.dtype)
         mask_rhoy = (self.rho_y != 0)
         mask_e_y = e[:,:,1:2] > ecy
         mask_1_y = mask & mask_rhoy & mask_e_y
@@ -627,12 +651,12 @@ class ConstitutiveLaws():
         _, _, srx0_lbd, sry0_lbd = self.sr0_vc(th)
 
         # 2 Steel contribution
-        ssx = np.zeros((e.shape[0], e.shape[1],1), dtype = np.complex64)
+        ssx = np.zeros((e.shape[0], e.shape[1],1), dtype = self.dtype)
         mask_rhox = (self.rho_x != 0)
         ssx[mask&mask_rhox] = self.ssr(self.e[:,:,0:1][mask&mask_rhox], ecx[mask&mask_rhox], self.ecsx,
                                        srx0_lbd[mask&mask_rhox], self.rho_x[mask&mask_rhox], mask&mask_rhox)
 
-        ssy = np.zeros((self.e.shape[0], self.e.shape[1],1), dtype = np.complex64)
+        ssy = np.zeros((self.e.shape[0], self.e.shape[1],1), dtype = self.dtype)
         mask_rhoy = (self.rho_y != 0)
         ssy[mask&mask_rhoy] = self.ssr(self.e[:,:,1:2][mask&mask_rhoy], ecy[mask&mask_rhoy], self.ecsy,
                                        sry0_lbd[mask&mask_rhoy], self.rho_y[mask&mask_rhoy], mask&mask_rhoy)
@@ -653,14 +677,27 @@ class ConstitutiveLaws():
 
         return sx, sy, txy
 
+    def sigma_shear(self):
+        """
+        Linear out-of-plane shear stresses (Reissner-Mindlin) from gxz = self.e[:, :, 3], gyz = self.e[:, :, 4]:
+        txz = 5/6 G gxz, tyz = 5/6 G gyz with G = Ec / (2 (1 + nu)) and the shear correction factor 5/6.
+
+        Returns:
+            tuple: txz, tyz, each (n_tot, nl, 1)
+        """
+        G = self.Ec / (2.0 * (1.0 + self.v))
+        return (5.0 / 6.0) * G * self.e[:, :, 3:4], (5.0 / 6.0) * G * self.e[:, :, 4:5]
+
     ''' -------------------------------------OUTPUT (STRESSES)-------------------------------------'''
 
-    def out(self):
+    def out(self, shear_out = False):
         """ ------------------------------------------- Define Output---------------------------------------------------
             --------------------------------------------    INPUT: -----------------------------------------------------
-            - self.e:       [ex_klij,ey_klij,gxy_klij] strain state in integration point
+            - self.e:       [ex_klij,ey_klij,gxy_klij(,gxz_klij,gyz_klij)] strain state in integration point
+            - shear_out:    if True, also return the out-of-plane shear stresses (needs the 5-component strains)
             --------------------------------------------- OUTPUT:-------------------------------------------------------
-            - s:            [sx_klij,sy_klij,txy_klij] stress state in integration point
+            - s:            [sx_klij,sy_klij,txy_klij] stress state in integration point, shape (n_tot, nl, 3, 1);
+                            with shear_out: [sx, sy, txy, txz, tyz], shape (n_tot, nl, 5, 1)
         -------------------------------------------------------------------------------------------------------------"""
 
         # 1 Assign Strain Values
@@ -680,9 +717,9 @@ class ConstitutiveLaws():
             mask1 = (submodel == 1)
             mask2 = ~mask3 & ~mask1
 
-            sx  = np.zeros((n_tot, self.nl, 1), dtype = np.complex64)
-            sy  = np.zeros((n_tot, self.nl, 1), dtype = np.complex64)
-            txy = np.zeros((n_tot, self.nl, 1), dtype = np.complex64)
+            sx  = np.zeros((n_tot, self.nl, 1), dtype = self.dtype)
+            sy  = np.zeros((n_tot, self.nl, 1), dtype = self.dtype)
+            txy = np.zeros((n_tot, self.nl, 1), dtype = self.dtype)
 
             sx[mask3], sy[mask3], txy[mask3] = self.sigma_cart_33(mask3)
             sx[mask1], sy[mask1], txy[mask1] = self.sigma_cart_31(mask1)
@@ -692,8 +729,13 @@ class ConstitutiveLaws():
         #   non-singular at zero shear strain
         ff = self.Ec/100
         mask_floor = abs(txy.imag) < abs(gxy.imag)*ff/2
-        print(f'Amount of points that trigger shear stiffness tolerance: {mask_floor.sum()}/{mask_floor.size} = {mask_floor.sum()/mask_floor.size*100:.2f}%')
+        if self.verbose:
+            print(f'Amount of points that trigger shear stiffness tolerance: {mask_floor.sum()}/{mask_floor.size} = {mask_floor.sum()/mask_floor.size*100:.2f}%')
         txy = np.where(mask_floor, cplx(txy.real, abs(gxy.imag)*ff/2), txy)
+
+        if shear_out:
+            txz, tyz = self.sigma_shear()
+            return np.stack((sx, sy, txy, txz, tyz), axis = 2)
 
         s = np.stack((sx, sy, txy), axis = 2)
 

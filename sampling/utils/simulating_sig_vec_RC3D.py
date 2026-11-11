@@ -54,8 +54,21 @@ def geom_column_names(constants):
 
 
 class SigSimulator:
-    def __init__(self, constants):
+    """
+    Section model: layer strains, layer stresses and the generalised stresses / tangents of layered RC sections. Also
+    used by the deployment (deploying/fea_utils/fem_vb.py) for the layer strains and the thickness integration.
+
+    Args:
+        constants   (dict): section constants (n_layer, t, nu, rho_x, rho_y, D, ...; see constant_sampling_params)
+        verbose     (bool): print the run time of every step
+    """
+    def __init__(self, constants, verbose = True):
         self.constants = constants
+        self.verbose = verbose
+
+    def _log(self, msg):
+        if self.verbose:
+            print(msg)
 
 
     def build_geom(self, eps_g_batch, geom_keys=None) -> dict:
@@ -151,7 +164,7 @@ class SigSimulator:
         e = eps_mem[:, np.newaxis, :] - z[..., np.newaxis] * chi[:, np.newaxis, :]   # (n_tot, nl, 3)
 
         t1 =(time.perf_counter()-t0)
-        print(f'Calculated layer strains e in {t1/60:.2f} min.')
+        self._log(f'Calculated layer strains e in {t1/60:.2f} min.')
         return e
 
 
@@ -179,26 +192,26 @@ class SigSimulator:
             material_law0 = ConstitutiveLaws(e0, self.constants, mat_dict, cm_klij=cm_klij, geom=geom)
             s[:,:,0,:] = material_law0.out().squeeze(-1)
             t1 =(time.perf_counter()-t0)
-            print(f'Calculated 1/3 instance of layer stresses s in {t1/60:.2f} min.')
+            self._log(f'Calculated 1/3 instance of layer stresses s in {t1/60:.2f} min.')
 
             e1 = e+np.array([0,0.0000000000000001j,0])
             material_law1 = ConstitutiveLaws(e1, self.constants, mat_dict, cm_klij=cm_klij, geom=geom)
             s[:,:,1,:] = material_law1.out().squeeze(-1)
             t2 =(time.perf_counter()-t0)
-            print(f'Calculated 2/3 instance of layer stresses s in {t2/60:.2f} min.')
+            self._log(f'Calculated 2/3 instance of layer stresses s in {t2/60:.2f} min.')
 
             e2 = e+np.array([0,0,0.0000000000000001j])
             material_law2 = ConstitutiveLaws(e2, self.constants, mat_dict, cm_klij=cm_klij, geom=geom)
             s[:,:,2,:] = material_law2.out().squeeze(-1)
             t3 =(time.perf_counter()-t0)
-            print(f'Calculated 3/3 instance of layer stresses s in {t3/60:.2f} min.')
+            self._log(f'Calculated 3/3 instance of layer stresses s in {t3/60:.2f} min.')
 
         elif cm_klij == 1:
             # Linear Elastic calculation
             material_law0 = ConstitutiveLaws(e, self.constants, mat_dict, cm_klij=cm_klij, geom=geom)
             s = material_law0.out().real
             t1 =(time.perf_counter()-t0)
-            print(f'Calculated linear elastic layer stresses s in {t1/60:.2f} min.')
+            self._log(f'Calculated linear elastic layer stresses s in {t1/60:.2f} min.')
 
         return s
 
@@ -232,7 +245,7 @@ class SigSimulator:
         sh = (t/nl) * sh_layer.sum(axis = 1)            # (n_tot, 6); (n,1)*(n,6) or scalar*(n,6)
 
         t1 =(time.perf_counter()-t0)
-        print(f'Calculated generalised stresses sh in {t1/60:.2f} min.')
+        self._log(f'Calculated generalised stresses sh in {t1/60:.2f} min.')
         return sh
 
 
@@ -277,7 +290,7 @@ class SigSimulator:
         De   = np.concatenate([De_1, De_2], axis=1)         # (n_tot, 6, 6)
 
         t1 =(time.perf_counter()-t0)
-        print(f'Calculated stiffness matrix D in {t1/60:.2f} min.')
+        self._log(f'Calculated stiffness matrix D in {t1/60:.2f} min.')
         return De
 
 
