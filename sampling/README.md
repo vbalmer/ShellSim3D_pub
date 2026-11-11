@@ -1,8 +1,8 @@
-# Sampler for reinforced concrete shell sections
+# Sampler for reinforced concrete shell elements
 
 This folder generates the dataset used to train the data-driven shell model: pairs of **generalised strains** and
 **generalised stresses**, together with the **tangent stiffness**, for layered reinforced concrete (RC) shell
-sections with varying thickness, reinforcement and material strengths.
+elements with varying thickness, reinforcement and material strengths.
 
 ## Contents
 
@@ -31,7 +31,7 @@ sections with varying thickness, reinforcement and material strengths.
    They are stored as additional input columns.
 3. **Admissibility filter**: samples whose outermost layers exceed the principal-strain limits
    (`eps_2 > principal_filter_eps_2_min`, `eps_1 < principal_filter_eps_1`) are removed.
-4. **Simulation**: the section is divided into `n_layer` layers. Each layer is evaluated with a plane-stress RC
+4. **Simulation**: the element is divided into `n_layer` layers. Each layer is evaluated with a plane-stress RC
    model with rotating cracks: concrete in compression with softening (fib Model Code / CSFM, or Kaufmann 1998),
    reinforcement with the tension chord model and a bilinear bare-steel law. Layer stresses are integrated over the
    thickness to `[n_x, n_y, n_xy, m_x, m_y, m_xy]`. The tangent stiffness `D` is computed with the complex-step method.

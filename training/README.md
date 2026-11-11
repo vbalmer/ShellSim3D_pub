@@ -1,4 +1,4 @@
-# Training of the surrogate model for reinforced concrete shell sections
+# Training of the surrogate model for reinforced concrete shell elements
 
 This folder trains the data-driven shell model: a neural network that maps the **generalised strains** and the
 **geometry / material** of a layered reinforced concrete (RC) shell section to the **generalised stresses**. The
