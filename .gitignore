@@ -2,6 +2,10 @@ __pycache__/
 *.pyc
 wandb/
 sampling/plots/
+training/checkpoints/
+training/logs/
+training/plots/
+training/plots_single_el/
 .vscode/
 
 # sampling/data holds the small example dataset (committed); write large runs elsewhere via DATA_DIR
