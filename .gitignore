@@ -6,6 +6,12 @@ training/checkpoints/
 training/logs/
 training/plots/
 training/plots_single_el/
+deploying/data_out/
+deploying/plots_load_path_table/
+deploying/plots_frame_bridge/
 .vscode/
+
+# unpublished figure (paper not yet published)
+deploying/frame_bridge/fb_ml_nlfea.png
 
 # sampling/data holds the small example dataset (committed); write large runs elsewhere via DATA_DIR
